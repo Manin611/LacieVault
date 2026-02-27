@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LacieVault</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="auth.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+
+<!-- Ambient background -->
+<div class="bg-layer" aria-hidden="true">
+    <div class="bg-blob b1"></div>
+    <div class="bg-blob b2"></div>
+    <div class="bg-blob b3"></div>
+    <div class="bg-noise"></div>
+</div>
+
+<!-- AUTH MODAL -->
+<div id="authModal" class="auth-overlay">
+    <div class="auth-card">
+        <div class="auth-logo">
+            <span class="auth-logo-icon">册</span>
+            <div>
+                <h1 class="auth-title">Lacie<span class="auth-accent">VAULT</span></h1>
+                <p class="auth-subtitle">Tu librería personal de manga &amp; anime</p>
+            </div>
+        </div>
+
+        <div class="auth-tabs">
+            <button class="auth-tab active" data-tab="login"    onclick="switchAuthTab('login')">Entrar</button>
+            <button class="auth-tab"        data-tab="register" onclick="switchAuthTab('register')">Registro</button>
+            <button class="auth-tab"        data-tab="reset"    onclick="switchAuthTab('reset')">Recuperar</button>
+        </div>
+
+        <div id="authError"   class="auth-error   hidden"></div>
+        <div id="authMessage" class="auth-message hidden"></div>
+
+        <!-- Login -->
+        <div class="auth-form" data-form="login">
+            <div class="auth-field">
+                <label for="loginEmail">Email</label>
+                <input type="email" id="loginEmail" placeholder="tu@email.com" autocomplete="email">
+            </div>
+            <div class="auth-field">
+                <label for="loginPassword">Contraseña</label>
+                <input type="password" id="loginPassword" placeholder="••••••••" autocomplete="current-password">
+            </div>
+            <button class="auth-submit-btn" onclick="loginWithEmail(
+                document.getElementById('loginEmail').value,
+                document.getElementById('loginPassword').value
+            )"><i class="fas fa-sign-in-alt"></i> Entrar</button>
+        </div>
+
+        <!-- Register -->
+        <div class="auth-form hidden" data-form="register">
+            <div class="auth-field">
+                <label for="regEmail">Email</label>
+                <input type="email" id="regEmail" placeholder="tu@email.com" autocomplete="email">
+            </div>
+            <div class="auth-field">
+                <label for="regPassword">Contraseña</label>
+                <input type="password" id="regPassword" placeholder="Mín. 6 caracteres" autocomplete="new-password">
+            </div>
+            <div class="auth-field">
+                <label for="regPassword2">Confirmar contraseña</label>
+                <input type="password" id="regPassword2" placeholder="••••••••" autocomplete="new-password">
+            </div>
+            <button class="auth-submit-btn" onclick="handleRegister()">
+                <i class="fas fa-user-plus"></i> Crear cuenta
+            </button>
+        </div>
+
+        <!-- Reset -->
+        <div class="auth-form hidden" data-form="reset">
+            <p class="auth-hint">Te enviaremos un link para restablecer tu contraseña.</p>
+            <div class="auth-field">
+                <label for="resetEmail">Email</label>
+                <input type="email" id="resetEmail" placeholder="tu@email.com">
+            </div>
+            <button class="auth-submit-btn" onclick="resetPassword(document.getElementById('resetEmail').value)">
+                <i class="fas fa-envelope"></i> Enviar link
+            </button>
+        </div>
+
+        <div class="auth-divider"><span>o continúa con</span></div>
+
+        <button class="auth-google-btn" onclick="loginWithGoogle()">
+            <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+                <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
+                <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
+                <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
+                <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
+            </svg>
+            Continuar con Google
+        </button>
+    </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="mainApp" class="hidden">
+<div class="app-container">
+
+    <header class="site-header">
+        <div class="logo-area">
+            <span class="logo-icon">册</span>
+            <div class="logo-text">
+                <h1>Lacie<span class="logo-accent">VAULT</span></h1>
+                <p class="tagline">Librería personal · 2026</p>
+            </div>
+        </div>
+        <div class="stats-bar">
+            <div class="stat-pill"><span class="stat-num" id="statTotal">0</span><span class="stat-label">Total</span></div>
+            <div class="stat-pill"><span class="stat-num" id="statManga">0</span><span class="stat-label">Manga</span></div>
+            <div class="stat-pill"><span class="stat-num" id="statAnime">0</span><span class="stat-label">Anime</span></div>
+            <div class="stat-pill"><span class="stat-num" id="statPanels">0</span><span class="stat-label">Paneles</span></div>
+        </div>
+        <div class="user-area">
+            <img id="userAvatar" class="user-avatar hidden" src="" alt="Avatar">
+            <span id="userEmail" class="user-email"></span>
+            <button class="action-btn ghost" onclick="logout()" title="Cerrar sesión">
+                <i class="fas fa-sign-out-alt"></i>
+            </button>
+        </div>
+    </header>
+
+    <section class="search-section">
+        <div class="search-inner">
+            <div class="search-field-wrap">
+                <i class="fas fa-search search-icon-left"></i>
+                <input type="text" id="searchInput"
+                    placeholder="Berserk, Vagabond, Chainsaw Man…"
+                    autocomplete="off">
+                <ul id="searchResults" class="search-results hidden" role="listbox"></ul>
+            </div>
+            <div class="search-type-pills">
+                <button class="type-pill active" onclick="setTypeFilter(this,'all')">TODO</button>
+                <button class="type-pill" onclick="setTypeFilter(this,'MANGA')">MANGA</button>
+                <button class="type-pill" onclick="setTypeFilter(this,'ANIME')">ANIME</button>
+            </div>
+            <div class="search-actions">
+                <button class="action-btn primary" onclick="searchManga()" id="searchBtn">
+                    <i class="fas fa-search"></i><span>BUSCAR</span>
+                </button>
+                <button class="action-btn ghost" onclick="exportLibrary()" title="Exportar"><i class="fas fa-download"></i></button>
+                <button class="action-btn ghost" onclick="triggerImport()" title="Importar"><i class="fas fa-file-import"></i></button>
+                <input id="importFile" type="file" accept="application/json" style="display:none" onchange="handleImportFile(event)">
+            </div>
+        </div>
+    </section>
+
+    <div id="preview-area" class="preview-overlay hidden" role="dialog" aria-modal="true">
+        <div class="preview-backdrop" onclick="closePreview()"></div>
+        <div class="preview-card">
+            <button class="preview-close-btn" onclick="closePreview()"><i class="fas fa-times"></i></button>
+            <div class="preview-cover">
+                <img id="preview-img" src="" alt="Portada">
+                <div class="preview-cover-glow"></div>
+            </div>
+            <div class="preview-body">
+                <div class="preview-meta">
+                    <span class="preview-type-tag" id="preview-status">—</span>
+                    <a href="#" id="preview-anilist-link" target="_blank" rel="noopener" class="anilist-link">
+                        <i class="fas fa-external-link-alt"></i>
+                    </a>
+                </div>
+                <h2 id="preview-title" class="preview-title">Título</h2>
+                <div class="preview-score-row">
+                    <span class="score-badge" id="preview-score">★ 0.0</span>
+                    <div class="preview-personal-stars" id="previewPersonalStars"></div>
+                </div>
+                <div class="rating-control">
+                    <label class="control-label" for="personalRating">Mi puntuación</label>
+                    <div class="rating-slider-wrap">
+                        <input type="range" id="personalRating" min="0" max="10" step="0.5" value="0">
+                        <span class="rating-display" id="personalRatingValue">0</span>
+                    </div>
+                </div>
+                <div class="panels-section">
+                    <div class="panels-header">
+                        <label class="control-label">Paneles favoritos</label>
+                        <div class="panels-actions">
+                            <button class="icon-btn" onclick="document.getElementById('panelFiles').click()" title="Agregar">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <input id="panelFiles" type="file" accept="image/*" multiple style="display:none" onchange="handlePanelFiles(event)">
+                    <div id="panelsPreview" class="panels-grid"></div>
+                </div>
+                <div class="comment-section">
+                    <label class="control-label" for="personalComment">Notas</label>
+                    <textarea id="personalComment" rows="3" placeholder="Escenas favoritas, timestamps, impresiones…"></textarea>
+                </div>
+                <div class="preview-cta">
+                    <button class="cta-btn save-btn" onclick="addToLibrary()">
+                        <i class="fas fa-bookmark"></i> GUARDAR EN COLECCIÓN
+                    </button>
+                    <button class="cta-btn cancel-btn" onclick="closePreview()">Cancelar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <section class="collection-section">
+        <div class="collection-header">
+            <div class="section-label">
+                <span class="section-line"></span>
+                <h2>MI COLECCIÓN</h2>
+            </div>
+            <div class="collection-controls">
+                <div class="filter-pills">
+                    <button class="filter-pill active" onclick="setLibFilter(this,'all')">Todo</button>
+                    <button class="filter-pill" onclick="setLibFilter(this,'MANGA')">Manga</button>
+                    <button class="filter-pill" onclick="setLibFilter(this,'ANIME')">Anime</button>
+                    <button class="filter-pill" onclick="setLibFilter(this,'MANHWA')">Manhwa</button>
+                </div>
+                <select id="sortSelect" class="sort-select" onchange="renderLibrary()">
+                    <option value="added">Reciente</option>
+                    <option value="score_desc">Mi score ↓</option>
+                    <option value="score_asc">Mi score ↑</option>
+                    <option value="title">A–Z</option>
+                </select>
+                <div class="view-toggle">
+                    <button class="view-btn active" id="viewGrid" onclick="setView('grid')" title="Cuadrícula"><i class="fas fa-th-large"></i></button>
+                    <button class="view-btn" id="viewList" onclick="setView('list')" title="Lista"><i class="fas fa-list"></i></button>
+                </div>
+            </div>
+        </div>
+        <div class="lib-search-wrap">
+            <i class="fas fa-search lib-search-icon"></i>
+            <input id="librarySearch" type="search" placeholder="Buscar en mi colección…">
+            <button id="librarySearchClear" class="lib-clear-btn"><i class="fas fa-times"></i></button>
+        </div>
+        <div id="library-grid" class="library-grid"></div>
+    </section>
+
+</div>
+</div>
+
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+<div id="panelViewer" class="panel-viewer hidden" aria-hidden="true">
+    <div class="pv-backdrop" onclick="closePanelViewer()"></div>
+    <div class="pv-content" role="dialog" aria-modal="true">
+        <button class="pv-close" onclick="closePanelViewer()"><i class="fas fa-times"></i></button>
+        <button class="pv-prev" onclick="prevPanel()"><i class="fas fa-chevron-left"></i></button>
+        <figure>
+            <img id="panelViewerImg" src="" alt="Panel ampliado">
+            <figcaption id="panelViewerCaption"></figcaption>
+        </figure>
+        <button class="pv-next" onclick="nextPanel()"><i class="fas fa-chevron-right"></i></button>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="auth.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
