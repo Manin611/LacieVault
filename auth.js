@@ -15,15 +15,18 @@ let currentUser = null;
 
 /* ── Init Auth ──────────────────────────────────────────── */
 async function initAuth() {
-    // Escuchar cambios de sesión (login, logout, OAuth redirect)
-    sb.auth.onAuthStateChange(async (event, session) => {
+    // IMPORTANTE: No hacer llamadas async a Supabase (postgREST/storage) dentro
+    // del callback: provoca deadlock y las siguientes llamadas (ej. guardar) no responden.
+    // Ver: https://github.com/supabase/gotrue-js/issues/762
+    sb.auth.onAuthStateChange((event, session) => {
         currentUser = session?.user || null;
 
         if (currentUser) {
             hideAuthModal();
             showApp();
             updateUserUI(currentUser);
-            await loadLibraryFromDB();
+            // Diferir carga de la DB para que el callback termine y se libere el lock del token
+            setTimeout(() => { loadLibraryFromDB(); }, 0);
         } else {
             showAuthModal();
             hideApp();
@@ -35,6 +38,12 @@ async function initAuth() {
     if (!session) {
         showAuthModal();
         hideApp();
+    } else {
+        currentUser = session.user;
+        hideAuthModal();
+        showApp();
+        updateUserUI(currentUser);
+        setTimeout(() => { loadLibraryFromDB(); }, 0);
     }
 }
 
@@ -107,46 +116,65 @@ async function resetPassword(email) {
 async function loadLibraryFromDB() {
     if (!currentUser) return;
 
-    const { data, error } = await sb
+    // Query 1: cargar librería
+    const { data: libData, error: libErr } = await sb
         .from('library')
-        .select('*, panels(*)')
+        .select('*')
         .eq('user_id', currentUser.id)
         .order('added_at', { ascending: false });
 
-    if (error) { console.error('loadLibrary:', error); return; }
+    if (libErr) { console.error('loadLibrary:', libErr); return; }
+    if (!libData || libData.length === 0) { myLibrary = []; renderLibrary(); updateStats(); return; }
 
-    // Convertir formato DB → formato app
-    myLibrary = await Promise.all((data || []).map(async (row) => {
-        // Cargar URLs de paneles desde Storage
-        const panels = await Promise.all((row.panels || []).map(async (p) => {
-            const { data: urlData } = sb.storage
-                .from('panels')
-                .getPublicUrl(p.storage_path);
-            return {
+    // Query 2: cargar paneles por separado
+    const mangaIds = libData.map(r => r.manga_id);
+    const { data: panelsData, error: panelsErr } = await sb
+        .from('panels')
+        .select('*')
+        .eq('user_id', currentUser.id)
+        .in('manga_id', mangaIds);
+
+    if (panelsErr) console.error('loadLibrary panels:', panelsErr);
+
+    // URLs para mostrar imágenes al recargar: firmadas (bucket privado) o públicas (bucket público)
+    const panelsByManga = {};
+    if (panelsData?.length) {
+        await Promise.all(panelsData.map(async (p) => {
+            let imageUrl = '';
+            const { data: signed, error: signErr } = await sb.storage.from('panels').createSignedUrl(p.storage_path, 3600);
+            if (signErr || !signed?.signedUrl) {
+                const { data: pub } = sb.storage.from('panels').getPublicUrl(p.storage_path);
+                imageUrl = pub?.publicUrl || '';
+            } else {
+                imageUrl = signed.signedUrl;
+            }
+            if (!panelsByManga[p.manga_id]) panelsByManga[p.manga_id] = [];
+            panelsByManga[p.manga_id].push({
                 id:          p.id,
                 name:        p.name,
-                dataUrl:     urlData?.publicUrl || '',
+                dataUrl:     imageUrl,
+                url:         imageUrl,
                 storagePath: p.storage_path,
-                favorite:    p.favorite
-            };
+                favorite:    !!p.favorite
+            });
         }));
+    }
 
-        return {
-            id:             row.manga_id,
-            dbId:           row.id,
-            title:          row.title,
-            image:          row.image,
-            score:          row.score,
-            status:         row.status,
-            url:            row.url,
-            type:           row.type,
-            format:         row.format,
-            genres:         row.genres || [],
-            personalRating: row.personal_rating,
-            comment:        row.comment,
-            addedAt:        row.added_at,
-            panels
-        };
+    myLibrary = libData.map(row => ({
+        id:             row.manga_id,
+        dbId:           row.id,
+        title:          row.title,
+        image:          row.image,
+        score:          row.score,
+        status:         row.status,
+        url:            row.url,
+        type:           row.type,
+        format:         row.format,
+        genres:         row.genres || [],
+        personalRating: row.personal_rating,
+        comment:        row.comment,
+        addedAt:        row.added_at,
+        panels:         panelsByManga[row.manga_id] || []
     }));
 
     renderLibrary();
@@ -154,6 +182,7 @@ async function loadLibraryFromDB() {
 }
 
 async function saveItemToDB(item) {
+    console.log("saveItemToDB START", item.title, currentUser?.id);
     if (!currentUser) return;
 
     const row = {
@@ -177,7 +206,8 @@ async function saveItemToDB(item) {
         .select()
         .single();
 
-    if (error) { console.error('saveItem:', error); showToast('⚠ Error al guardar'); return null; }
+    console.log("saveItemToDB DONE", data, error);
+    if (error) { console.error("saveItem:", error); showToast("⚠ Error al guardar"); return null; }
     return data.id; // dbId para relacionar paneles
 }
 
@@ -193,17 +223,24 @@ async function deleteItemFromDB(mangaId) {
 async function uploadPanel(file, mangaId, dbLibraryId) {
     if (!currentUser) return null;
 
-    const ext  = file.name.split('.').pop();
+    const ext  = file.name.split('.').pop() || 'jpg';
     const path = `${currentUser.id}/${mangaId}/${Date.now()}.${ext}`;
 
-    // Subir archivo al bucket
+    // 1. Subir archivo al bucket Storage "panels"
     const { error: upErr } = await sb.storage
         .from('panels')
         .upload(path, file, { upsert: false });
 
-    if (upErr) { console.error('uploadPanel:', upErr); return null; }
+    if (upErr) {
+        console.error('uploadPanel Storage:', upErr);
+        const msg = upErr.message || String(upErr);
+        if (typeof showToast === 'function') {
+            showToast('⚠ Imagen no guardada: ' + (msg.includes('Bucket') ? 'crea el bucket "panels" en Storage y revisa políticas.' : msg));
+        }
+        return null;
+    }
 
-    // Guardar referencia en la tabla panels
+    // 2. Guardar referencia en la tabla public.panels
     const { data, error: dbErr } = await sb.from('panels').insert({
         user_id:      currentUser.id,
         manga_id:     mangaId,
@@ -212,15 +249,20 @@ async function uploadPanel(file, mangaId, dbLibraryId) {
         favorite:     false
     }).select().single();
 
-    if (dbErr) { console.error('panelDB:', dbErr); return null; }
+    if (dbErr) {
+        console.error('uploadPanel tabla panels:', dbErr);
+        if (typeof showToast === 'function') {
+            showToast('⚠ Referencia no guardada: ' + (dbErr.message || 'revisa que exista la tabla "panels" y RLS.'));
+        }
+        return null;
+    }
 
-    // Obtener URL pública
     const { data: urlData } = sb.storage.from('panels').getPublicUrl(path);
-
     return {
         id:          data.id,
         name:        file.name,
-        dataUrl:     urlData.publicUrl,
+        dataUrl:     urlData?.publicUrl || '',
+        url:         urlData?.publicUrl || '',
         storagePath: path,
         favorite:    false
     };

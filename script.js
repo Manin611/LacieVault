@@ -94,7 +94,7 @@ function updateStats() {
     const manga  = myLibrary.filter(m => (m.status || '').toUpperCase().includes('MANGA')).length;
     const anime  = myLibrary.filter(m => (m.status || '').toUpperCase().includes('ANIME')).length;
     const panels = myLibrary.reduce((acc, m) => acc + (m.panels ? m.panels.length : 0), 0);
-    const setN   = (id, v) => { const el = document.getElementById(id); if (el) el.querySelector('.stat-num').textContent = v; };
+    const setN = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
     setN('statTotal', total); setN('statManga', manga); setN('statAnime', anime); setN('statPanels', panels);
 }
 
@@ -293,6 +293,7 @@ function closePreview() {
 
 /* ── Add / Save ─────────────────────────────────────────── */
 async function addToLibrary() {
+    console.log("addToLibrary START");
     if (!currentManga) return;
     const pr = document.getElementById('personalRating');
     const personalRating = pr ? parseFloat(pr.value) || 0 : 0;
@@ -304,45 +305,69 @@ async function addToLibrary() {
     const btn = document.querySelector('.save-btn');
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Guardando…'; }
 
-    if (editingIndex !== null && myLibrary[editingIndex]) {
-        myLibrary[editingIndex] = item;
-        editingIndex = null;
-        await saveItemToDB(item);
-        showToast(`✓ Cambios guardados — ${item.title}`);
-    } else {
-        if (myLibrary.some(m => m.id === item.id)) { showToast('⚠ Ya está en tu colección'); return; }
-        // Subir paneles nuevos (los que tienen dataUrl pero no storagePath)
-        const uploadedPanels = await uploadPanelsForItem(item);
-        item.panels = uploadedPanels;
-        myLibrary.unshift(item);
-        await saveItemToDB(item);
-        showToast(`✓ Agregado — ${item.title}`);
+    try {
+        if (editingIndex !== null && myLibrary[editingIndex]) {
+            // Edición — guardar sin paneles primero
+            const itemSinPaneles = { ...item, panels: [] };
+            myLibrary[editingIndex] = item;
+            editingIndex = null;
+            const dbId = await saveItemToDB(itemSinPaneles);
+            console.log("dbId resultado:", dbId);
+            if (!dbId) throw new Error('Error al guardar en DB');
+            showToast(`✓ Cambios guardados — ${item.title}`);
+        } else {
+            if (myLibrary.some(m => m.id === item.id)) {
+                showToast('⚠ Ya está en tu colección');
+                if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-bookmark"></i> GUARDAR EN COLECCIÓN'; }
+                return;
+            }
+            console.log("Guardando en DB...");
+            const itemSinPaneles = { ...item, panels: [] };
+            const dbId = await saveItemToDB(itemSinPaneles);
+            console.log("dbId resultado:", dbId);
+            if (!dbId) throw new Error('Error al guardar en DB');
+
+            // 2. Subir paneles después si hay
+            if (panels.length > 0) {
+                showToast('✓ Guardado — subiendo paneles…');
+                const uploadedPanels = await uploadPanelsForItem(item);
+                item.panels = uploadedPanels;
+            }
+
+            myLibrary.unshift(item);
+            showToast(`✓ Agregado — ${item.title}`);
+        }
+    } catch (err) {
+        console.error('addToLibrary error:', err);
+        showToast('⚠ Error al guardar: ' + err.message);
     }
 
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-bookmark"></i> GUARDAR EN COLECCIÓN'; }
     renderLibrary();
     updateStats();
     closePreview();
-    // Verificar si hay datos locales para migrar (primera vez)
-    const local = JSON.parse(localStorage.getItem('maninVault_v2') || '[]');
-    if (local.length > 0) migrateLocalStorage();
 }
 
 async function uploadPanelsForItem(item) {
     if (!item.panels || !item.panels.length) return [];
     const result = [];
+    let failed = 0;
     for (const panel of item.panels) {
         if (panel.storagePath) {
-            // Ya está en Supabase
             result.push(panel);
         } else if (panel.dataUrl && panel.dataUrl.startsWith('data:')) {
-            // Convertir base64 → File y subir
-            const file = dataUrlToFile(panel.dataUrl, panel.name || 'panel.jpg');
-            const uploaded = await uploadPanel(file, item.id, null);
-            if (uploaded) result.push(uploaded);
-            else result.push(panel); // fallback
+            try {
+                const file = dataUrlToFile(panel.dataUrl, panel.name || 'panel.jpg');
+                const uploaded = await uploadPanel(file, item.id, null);
+                if (uploaded) result.push(uploaded);
+                else failed++;
+            } catch (e) {
+                console.error('uploadPanelsForItem:', e);
+                failed++;
+            }
         }
     }
+    if (failed > 0) showToast(`⚠ ${failed} imagen(es) no se pudieron guardar en Supabase. Revisa la consola.`);
     return result;
 }
 
