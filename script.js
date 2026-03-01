@@ -351,23 +351,18 @@ async function addToLibrary() {
 async function uploadPanelsForItem(item) {
     if (!item.panels || !item.panels.length) return [];
     const result = [];
-    let failed = 0;
     for (const panel of item.panels) {
         if (panel.storagePath) {
+            // Ya está en Supabase
             result.push(panel);
         } else if (panel.dataUrl && panel.dataUrl.startsWith('data:')) {
-            try {
-                const file = dataUrlToFile(panel.dataUrl, panel.name || 'panel.jpg');
-                const uploaded = await uploadPanel(file, item.id, null);
-                if (uploaded) result.push(uploaded);
-                else failed++;
-            } catch (e) {
-                console.error('uploadPanelsForItem:', e);
-                failed++;
-            }
+            // Convertir base64 → File y subir
+            const file = dataUrlToFile(panel.dataUrl, panel.name || 'panel.jpg');
+            const uploaded = await uploadPanel(file, item.id, null);
+            if (uploaded) result.push(uploaded);
+            else result.push(panel); // fallback
         }
     }
-    if (failed > 0) showToast(`⚠ ${failed} imagen(es) no se pudieron guardar en Supabase. Revisa la consola.`);
     return result;
 }
 
